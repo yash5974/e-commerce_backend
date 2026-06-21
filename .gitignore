@@ -1,0 +1,67 @@
+# dependencies
+node_modules/
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# build output
+dist/
+build/
+out/
+
+# TypeScript
+*.tsbuildinfo
+
+# env files (CRITICAL)
+.env
+.env.*
+!.env.example
+
+# cache
+.cache/
+.tmp/
+temp/
+
+# coverage
+coverage/
+
+# misc
+.DS_Store
+Thumbs.db
+
+# local db files (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# dump files
+dump/
+*.bson
+*.json
+
+# secrets
+.env
+.env.local
+.env.development
+.env.production
+
+# keys
+*.pem
+*.key
+*.cert
+*.crt
+keys/
+
+# JWT / private keys
+/private
+/keys
