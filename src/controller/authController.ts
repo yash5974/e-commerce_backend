@@ -1,39 +1,79 @@
+import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { Request, Response } from "express";
 import JWT from "jsonwebtoken";
 import mongoose from "mongoose";
 import { jwtConfig } from "../config/jwt.config";
 import { RefreshPayload } from "../config/types/auth.interface";
-import { RefreshTokenModel } from "../modal/refreshToken.model";
-import { UserModel } from "../modal/user.model";
+import { RefreshTokenModel } from "../model/refreshToken.model";
+import { UserModel } from "../model/user.model";
 import { asyncHandler } from "../utils/asyncHandler";
 import { hashToken, signAccessToken, signRefreshToken } from "../utils/jwt";
 
+export const register = asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
+
+  // 🔒 Validation
+  if (!name) throw new Error("Name is required");
+  if (!email) throw new Error("Email is required");
+  if (!password) throw new Error("Password is required");
+
+  // 🔒 Normalize email (index consistency)
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // 🔥 Index-covered query
+  const existingUser = await UserModel.findOne({
+    email: normalizedEmail,
+  }).select("_id");
+
+  if (existingUser) throw new Error("User already exists");
+
+  // 🔒 Hash password
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  const user = await UserModel.create({
+    name,
+    email: normalizedEmail,
+    passwordHash,
+  });
+  if (!user) throw new Error("User not registered");
+
+  res.status(201).json({
+    success: true,
+    data: user,
+  });
+});
+
 export const login = asyncHandler(async (req: Request, res: Response) => {
-  const { user } = req;
+  const { email, password } = req.body;
+
+  if (!email) throw new Error("Email Not found");
+  if (!password) throw new Error("Password Not found");
+
+  const user = await UserModel.findOne({ email });
   if (!user) throw new Error("User Not found");
 
+  const isMatch = await bcrypt.compare(password, user.passwordHash);
+  if (!isMatch) throw new Error("Invalid credentials");
+
+  const userId = user._id.toString();
+
   const accessToken = signAccessToken({
-    userId: user.userId,
+    userId,
     role: user.role,
   });
 
   const tokenId = crypto.randomUUID();
-
   const refreshToken = signRefreshToken({
-    userId: user.userId,
+    userId,
     tokenId,
   });
 
   const tokenHash = hashToken(refreshToken);
 
-  // 🔥 Idempotent device login (remove old session for same device)
-  await RefreshTokenModel.deleteMany({
-    userId: user.userId,
-  });
-
+  // ✅ Store refresh token
   await RefreshTokenModel.create({
-    userId: user.userId,
+    userId: userId,
     tokenId,
     tokenHash,
     isRevoked: false,
@@ -53,7 +93,9 @@ export const refreshToken = asyncHandler(async (req, res) => {
   let payload: RefreshPayload;
 
   try {
-    payload = JWT.verify(refreshToken, jwtConfig.publicKey) as RefreshPayload;
+    payload = JWT.verify(refreshToken, jwtConfig.publicKey, {
+      algorithms: ["RS256"],
+    }) as RefreshPayload;
   } catch {
     throw new Error("Invalid refresh token");
   }
@@ -65,6 +107,7 @@ export const refreshToken = asyncHandler(async (req, res) => {
   session.startTransaction();
 
   try {
+    // ✅ INDEX-COVERED QUERY
     const existingToken = await RefreshTokenModel.findOne({
       tokenHash,
       isRevoked: false,
@@ -73,33 +116,39 @@ export const refreshToken = asyncHandler(async (req, res) => {
       .select("_id tokenId userId")
       .session(session);
 
-    // 🔥 Reuse / expired → revoke all sessions
     if (!existingToken) {
+      // ✅ REVOKE ONLY ACTIVE TOKENS (index: userId + isRevoked)
       await RefreshTokenModel.updateMany(
-        { userId: userId },
+        { userId, isRevoked: false },
         { $set: { isRevoked: true } },
         { session },
       );
       throw new Error("Token reuse detected or expired");
     }
 
-    // 🔥 Anti-replay check
+    // ✅ STRICT MATCH (anti-tampering)
     if (existingToken.tokenId !== payload.tokenId) {
       await RefreshTokenModel.updateMany(
-        { userId: userId },
+        { userId, isRevoked: false },
         { $set: { isRevoked: true } },
         { session },
       );
       throw new Error("Token tampering detected");
     }
 
-    // 🔥 Rotate (revoke old)
-    await RefreshTokenModel.updateOne(
-      { _id: existingToken._id },
+    // ✅ ROTATE (atomic revoke)
+    const revokeResult = await RefreshTokenModel.updateOne(
+      { _id: existingToken._id, isRevoked: false },
       { $set: { isRevoked: true } },
       { session },
     );
 
+    // ✅ IDEMPOTENCY SAFE
+    if (revokeResult.modifiedCount === 0) {
+      throw new Error("Token already used");
+    }
+
+    // ✅ CREATE NEW TOKEN
     const newTokenId = crypto.randomUUID();
 
     const newRefreshToken = signRefreshToken({
@@ -112,7 +161,7 @@ export const refreshToken = asyncHandler(async (req, res) => {
     await RefreshTokenModel.create(
       [
         {
-          userId: userId,
+          userId,
           tokenId: newTokenId,
           tokenHash: newHash,
           isRevoked: false,
@@ -122,11 +171,14 @@ export const refreshToken = asyncHandler(async (req, res) => {
       { session },
     );
 
-    await session.commitTransaction();
+    // ✅ GET USER INSIDE TRANSACTION (CONSISTENCY)
+    const user = await UserModel.findById(userId)
+      .select("role")
+      .session(session);
 
-    // 🔥 RBAC (index-covered)
-    const user = await UserModel.findById(payload.userId).select("role");
     if (!user) throw new Error("User not found");
+
+    await session.commitTransaction();
 
     const newAccessToken = signAccessToken({
       userId: userId.toString(),
@@ -154,10 +206,14 @@ export const logout = asyncHandler(async (req, res) => {
 
   const tokenHash = hashToken(refreshToken);
 
-  await RefreshTokenModel.updateOne(
-    { tokenHash, isRevoked: false },
+  const result = await RefreshTokenModel.updateOne(
+    { tokenHash, isRevoked: false, expiresAt: { $gt: new Date() } },
     { $set: { isRevoked: true } },
   );
+
+  if (result.modifiedCount === 0) {
+    throw new Error("Invalid or already logged out");
+  }
 
   res.json({ success: true });
 });

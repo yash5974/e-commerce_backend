@@ -1,5 +1,5 @@
 import { Algorithm, SignOptions } from "jsonwebtoken";
-import { getPrivateKey, getPublicKey } from "./env";
+import { privateKey, publicKey } from "./env";
 
 export const jwtConfig: {
   privateKey: string;
@@ -8,9 +8,9 @@ export const jwtConfig: {
   refreshTokenExpiry: SignOptions["expiresIn"];
   algorithm: Algorithm;
 } = {
-  privateKey: getPrivateKey(),
-  publicKey: getPublicKey(),
-  accessTokenExpiry: "15m",
-  refreshTokenExpiry: "7d",
+  privateKey: privateKey,
+  publicKey: publicKey,
+  accessTokenExpiry: "1m",
+  refreshTokenExpiry: "2m",
   algorithm: "RS256" as Algorithm,
 };

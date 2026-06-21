@@ -10,21 +10,15 @@ export const authMiddleware = (roles: ("USER" | "ADMIN")[]) => {
     async (req: Request, res: Response, next: NextFunction) => {
       const authHeader = req.headers.authorization;
 
-      if (!authHeader) {
-        throw new Error("Unauthorized");
-      }
+      if (!authHeader) throw new Error("Missing Authorization header");
 
       const parts = authHeader.split(" ");
-
       if (parts.length !== 2 || parts[0] !== "Bearer") {
-        throw new Error("Unauthorized");
+        throw new Error("Invalid Authorization format");
       }
 
       const token = parts[1];
-
-      if (!token || token.length < 20) {
-        throw new Error("Unauthorized");
-      }
+      if (!token) throw new Error("Token missing");
 
       let payload: AuthPayload;
 
@@ -38,7 +32,6 @@ export const authMiddleware = (roles: ("USER" | "ADMIN")[]) => {
         throw new Error("Forbidden");
       }
 
-      // ✅ Works because of global augmentation
       req.user = payload;
 
       next();

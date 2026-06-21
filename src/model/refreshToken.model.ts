@@ -43,10 +43,17 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
 );
 
 // INDEX
-refreshTokenSchema.index({ tokenHash: 1, isRevoked: 1, expiresAt: 1 });
-refreshTokenSchema.index({ tokenHash: 1 }, { unique: true });
-refreshTokenSchema.index({ userId: 1 });
+refreshTokenSchema.index({
+  tokenHash: 1,
+  isRevoked: 1,
+  expiresAt: 1,
+});
+refreshTokenSchema.index({
+  userId: 1,
+  isRevoked: 1,
+});
 refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+refreshTokenSchema.index({ tokenId: 1 }, { unique: true });
 
 export const RefreshTokenModel = model<IRefreshToken>(
   "RefreshToken",
