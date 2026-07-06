@@ -10,7 +10,7 @@ export const jwtConfig: {
 } = {
   privateKey: privateKey,
   publicKey: publicKey,
-  accessTokenExpiry: "1m",
-  refreshTokenExpiry: "2m",
+  accessTokenExpiry: "1h",
+  refreshTokenExpiry: "7d",
   algorithm: "RS256" as Algorithm,
 };

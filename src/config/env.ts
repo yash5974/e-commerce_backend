@@ -5,6 +5,7 @@ dotenv.config({ quiet: true });
 export const environment = {
   PORT: process.env.PORT as string,
   DB_CONNECTION: process.env.DB_CONNECTION as string,
+  redisUrl: process.env.REDIS_URL as string,
 };
 
 export const { publicKey, privateKey } = generateKeyPairSync("rsa", {
