@@ -1,5 +1,5 @@
 import { Algorithm, SignOptions } from "jsonwebtoken";
-import { privateKey, publicKey } from "./env";
+import { privateKey, publicKey } from "./env.js";
 
 export const jwtConfig: {
   privateKey: string;

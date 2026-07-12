@@ -1,6 +1,8 @@
+export type Role = "USER" | "ADMIN";
+
 export type AuthPayload = {
   userId: string;
-  role: "USER" | "ADMIN";
+  role: Role;
 };
 
 // 🔥 Extend Express Request (global typing recommended)

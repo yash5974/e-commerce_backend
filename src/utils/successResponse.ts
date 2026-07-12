@@ -1,6 +1,6 @@
 import { Response } from "express";
 
-interface SuccessResponse<T> {
+export interface SuccessResponse<T> {
   success: true;
   message: string;
   data: T;

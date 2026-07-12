@@ -1,5 +1,5 @@
 import { Schema, model, Document } from "mongoose";
-import { BaseDocument } from "./base.types";
+import { BaseDocument } from "./base.types.js";
 
 export interface ICategory extends BaseDocument, Document {
   name: string;

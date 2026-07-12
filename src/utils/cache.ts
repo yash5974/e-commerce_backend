@@ -1,6 +1,6 @@
-import { redisClient } from "../config/redis";
+import { redisClient } from "../config/redis.js";
 
-export class Cache {
+export class CacheService {
   public static async get<T>(key: string): Promise<T | null> {
     try {
       if (!redisClient.isOpen) {

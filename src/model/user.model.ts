@@ -1,5 +1,5 @@
 import { Schema, model, Document } from "mongoose";
-import { BaseDocument, SoftDelete } from "./base.types";
+import { BaseDocument, SoftDelete } from "./base.types.js";
 
 export enum UserRole {
   USER = "USER",

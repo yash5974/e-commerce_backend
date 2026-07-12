@@ -1,6 +1,5 @@
 import { createClient } from "redis";
-import { environment } from "./env";
-import { redisService } from "../services/redis.service";
+import { environment } from "./env.js";
 
 export const redisClient = createClient({
   url: environment.redisUrl,

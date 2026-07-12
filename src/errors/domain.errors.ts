@@ -1,4 +1,4 @@
-import { BaseAppError } from "./base.error";
+import { BaseAppError } from "./base.error.js";
 
 export class NotFoundError extends BaseAppError {
   constructor(resource: string) {

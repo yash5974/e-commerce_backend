@@ -1,5 +1,5 @@
 import { Schema, model, Document } from "mongoose";
-import { BaseDocument, ObjectId } from "./base.types";
+import { BaseDocument, ObjectId } from "./base.types.js";
 
 export enum InventoryLogType {
   ORDER = "ORDER",
@@ -24,6 +24,11 @@ const inventoryLogSchema = new Schema<IInventoryLog>(
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
+
+inventoryLogSchema.index({
+  productId: 1,
+  createdAt: -1,
+});
 
 export const InventoryLogModel = model<IInventoryLog>(
   "InventoryLog",

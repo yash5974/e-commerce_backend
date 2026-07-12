@@ -1,5 +1,5 @@
-import { Schema, model, Document } from "mongoose";
-import { BaseDocument, SoftDelete, ObjectId } from "./base.types";
+import { Document, Schema, model } from "mongoose";
+import { BaseDocument, ObjectId, SoftDelete } from "./base.types.js";
 
 export interface IProduct extends BaseDocument, SoftDelete, Document {
   name: string;
@@ -42,9 +42,28 @@ const productSchema = new Schema<IProduct>(
 );
 
 // INDEXES (MANDATORY)
-productSchema.index({ slug: 1 });
-productSchema.index({ categoryId: 1, price: 1 });
-productSchema.index({ tags: 1 });
-productSchema.index({ rating: -1 });
+productSchema.index({
+  isActive: 1,
+  categoryId: 1,
+  createdAt: -1,
+});
+productSchema.index({
+  isActive: 1,
+  price: 1,
+});
+productSchema.index({
+  isActive: 1,
+  rating: -1,
+});
+productSchema.index({
+  isActive: 1,
+  brand: 1,
+});
+productSchema.index({
+  name: "text",
+  brand: "text",
+  tags: "text",
+});
+productSchema.index({ slug: 1 }, { unique: true });
 
 export const ProductModel = model<IProduct>("Product", productSchema);

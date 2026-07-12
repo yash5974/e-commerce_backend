@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import { IAppError, BaseAppError } from "../errors/base.error";
-import { mapMongoError } from "../errors/mongo.error.mapper";
-import { isMongoError } from "./error.utils";
+import { IAppError, BaseAppError } from "../errors/base.error.js";
+import { mapMongoError } from "../errors/mongo.error.mapper.js";
+import { isMongoError } from "./error.utils.js";
 
 export const globalErrorHandler = (
   err: IAppError | any,

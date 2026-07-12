@@ -1,5 +1,5 @@
 import { Schema, model, Document } from "mongoose";
-import { BaseDocument, ObjectId } from "./base.types";
+import { BaseDocument, ObjectId } from "./base.types.js";
 
 export enum OrderStatus {
   PENDING = "PENDING",
@@ -47,5 +47,6 @@ const orderSchema = new Schema<IOrder>(
 // INDEXES
 orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
 
 export const OrderModel = model<IOrder>("Order", orderSchema);

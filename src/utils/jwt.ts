@@ -1,8 +1,8 @@
 import crypto from "crypto";
 
 import JWT from "jsonwebtoken";
-import { jwtConfig } from "../config/jwt.config";
-import { AuthPayload, RefreshPayload } from "../config/types/auth.interface";
+import { jwtConfig } from "../config/jwt.config.js";
+import { AuthPayload, RefreshPayload } from "../config/types/auth.interface.js";
 
 export const signAccessToken = (payload: AuthPayload): string => {
   return JWT.sign(payload, jwtConfig.privateKey, {
@@ -30,4 +30,13 @@ export const signRefreshToken = (payload: RefreshPayload): string => {
     algorithm: jwtConfig.algorithm,
     expiresIn: jwtConfig.refreshTokenExpiry,
   });
+};
+
+export const PaymentGateway = {
+  async createIntent(amount: number) {
+    return {
+      providerPaymentId: crypto.randomUUID(),
+      clientSecret: crypto.randomUUID(),
+    };
+  },
 };

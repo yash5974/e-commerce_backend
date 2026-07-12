@@ -1,5 +1,5 @@
 import { Schema, model, Document } from "mongoose";
-import { BaseDocument, ObjectId } from "./base.types";
+import { BaseDocument, ObjectId } from "./base.types.js";
 
 export interface ICartItem {
   productId: ObjectId;

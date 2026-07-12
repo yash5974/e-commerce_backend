@@ -3,12 +3,18 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import JWT from "jsonwebtoken";
 import mongoose from "mongoose";
-import { jwtConfig } from "../config/jwt.config";
-import { RefreshPayload } from "../config/types/auth.interface";
-import { RefreshTokenModel } from "../model/refreshToken.model";
-import { UserModel } from "../model/user.model";
-import { asyncHandler } from "../utils/asyncHandler";
-import { hashToken, signAccessToken, signRefreshToken } from "../utils/jwt";
+import { jwtConfig } from "../config/jwt.config.js";
+import { RefreshPayload } from "../config/types/auth.interface.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+} from "../errors/domain.errors.js";
+import { RefreshTokenModel } from "../model/refreshToken.model.js";
+import { UserModel } from "../model/user.model.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { CacheService } from "../utils/cache.js";
+import { hashToken, signAccessToken, signRefreshToken } from "../utils/jwt.js";
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { name, email, password } = req.body;
@@ -50,7 +56,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!email) throw new Error("Email Not found");
   if (!password) throw new Error("Password Not found");
 
-  const user = await UserModel.findOne({ email });
+  const user = await UserModel.findOne({ email }).select(
+    "_id role passwordHash",
+  );
   if (!user) throw new Error("User Not found");
 
   const isMatch = await bcrypt.compare(password, user.passwordHash);
@@ -199,6 +207,52 @@ export const refreshToken = asyncHandler(async (req, res) => {
     session.endSession();
   }
 });
+
+export const getCurrentUser = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required");
+    }
+
+    const { userId } = req.user;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedError("Invalid authentication payload");
+    }
+
+    const cacheKey = `user:profile:${userId}`;
+
+    const cachedUser = await CacheService.get(cacheKey);
+
+    if (cachedUser) {
+      return res.status(200).json({
+        success: true,
+        message: "Current user fetched successfully",
+        data: cachedUser,
+      });
+    }
+
+    const user = await UserModel.findById(userId)
+      .select("_id fullName email role isActive createdAt updatedAt")
+      .lean();
+
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenError("Account is inactive");
+    }
+
+    await CacheService.set(cacheKey, user, 300);
+
+    return res.status(200).json({
+      success: true,
+      message: "Current user fetched successfully",
+      data: user,
+    });
+  },
+);
 
 export const logout = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;

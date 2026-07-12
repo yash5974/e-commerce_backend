@@ -1,5 +1,5 @@
-import { BaseAppError } from "./base.error";
-import { ConflictError, ValidationError } from "./domain.errors";
+import { BaseAppError } from "./base.error.js";
+import { ConflictError, ValidationError } from "./domain.errors.js";
 
 export const mapMongoError = (err: any): BaseAppError => {
   // Duplicate key (unique index violation)
