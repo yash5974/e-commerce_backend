@@ -1,9 +1,7 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { Request, Response } from "express";
-import JWT from "jsonwebtoken";
 import mongoose from "mongoose";
-import { jwtConfig } from "../config/jwt.config.js";
 import { RefreshPayload } from "../config/types/auth.interface.js";
 import {
   ForbiddenError,
@@ -14,7 +12,12 @@ import { RefreshTokenModel } from "../model/refreshToken.model.js";
 import { UserModel } from "../model/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { CacheService } from "../utils/cache.js";
-import { hashToken, signAccessToken, signRefreshToken } from "../utils/jwt.js";
+import {
+  hashToken,
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from "../utils/jwt.js";
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { name, email, password } = req.body;
@@ -57,7 +60,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!password) throw new Error("Password Not found");
 
   const user = await UserModel.findOne({ email }).select(
-    "_id role passwordHash",
+    "_id role passwordHash name email",
   );
   if (!user) throw new Error("User Not found");
 
@@ -69,12 +72,14 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const accessToken = signAccessToken({
     userId,
     role: user.role,
+    type: "ACCESS",
   });
 
   const tokenId = crypto.randomUUID();
   const refreshToken = signRefreshToken({
     userId,
     tokenId,
+    type: "REFRESH",
   });
 
   const tokenHash = hashToken(refreshToken);
@@ -88,125 +93,223 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
+  const activeuser = await UserModel.findByIdAndUpdate(user._id, {
+    isActive: true,
+  });
+
+  if (!activeuser) throw new Error("Error while logging in");
+
+  const userInfo = {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+
   res.json({
     success: true,
-    data: { accessToken, refreshToken },
+    data: { accessToken, refreshToken, user: userInfo },
+    message: "User logged in successfully",
   });
 });
 
-export const refreshToken = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) throw new Error("Refresh token required");
+export const refreshToken = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { refreshToken } = req.body as {
+      refreshToken?: unknown;
+    };
 
-  let payload: RefreshPayload;
-
-  try {
-    payload = JWT.verify(refreshToken, jwtConfig.publicKey, {
-      algorithms: ["RS256"],
-    }) as RefreshPayload;
-  } catch {
-    throw new Error("Invalid refresh token");
-  }
-
-  const tokenHash = hashToken(refreshToken);
-  const userId = new mongoose.Types.ObjectId(payload.userId);
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // ✅ INDEX-COVERED QUERY
-    const existingToken = await RefreshTokenModel.findOne({
-      tokenHash,
-      isRevoked: false,
-      expiresAt: { $gt: new Date() },
-    })
-      .select("_id tokenId userId")
-      .session(session);
-
-    if (!existingToken) {
-      // ✅ REVOKE ONLY ACTIVE TOKENS (index: userId + isRevoked)
-      await RefreshTokenModel.updateMany(
-        { userId, isRevoked: false },
-        { $set: { isRevoked: true } },
-        { session },
-      );
-      throw new Error("Token reuse detected or expired");
+    if (typeof refreshToken !== "string" || refreshToken.trim().length === 0) {
+      throw new UnauthorizedError("Refresh token is required.");
     }
 
-    // ✅ STRICT MATCH (anti-tampering)
-    if (existingToken.tokenId !== payload.tokenId) {
-      await RefreshTokenModel.updateMany(
-        { userId, isRevoked: false },
-        { $set: { isRevoked: true } },
-        { session },
-      );
-      throw new Error("Token tampering detected");
+    let payload: RefreshPayload;
+
+    try {
+      payload = verifyRefreshToken(refreshToken);
+    } catch {
+      throw new UnauthorizedError("Invalid or expired refresh token.");
     }
 
-    // ✅ ROTATE (atomic revoke)
-    const revokeResult = await RefreshTokenModel.updateOne(
-      { _id: existingToken._id, isRevoked: false },
-      { $set: { isRevoked: true } },
-      { session },
-    );
-
-    // ✅ IDEMPOTENCY SAFE
-    if (revokeResult.modifiedCount === 0) {
-      throw new Error("Token already used");
+    if (payload.type !== "REFRESH") {
+      throw new UnauthorizedError("Invalid refresh token.");
     }
 
-    // ✅ CREATE NEW TOKEN
-    const newTokenId = crypto.randomUUID();
+    if (!payload.userId || !payload.tokenId) {
+      throw new UnauthorizedError("Invalid refresh token payload.");
+    }
 
-    const newRefreshToken = signRefreshToken({
-      userId: userId.toString(),
-      tokenId: newTokenId,
-    });
+    if (!mongoose.isValidObjectId(payload.userId)) {
+      throw new UnauthorizedError("Invalid refresh token payload.");
+    }
 
-    const newHash = hashToken(newRefreshToken);
+    const userId = new mongoose.Types.ObjectId(payload.userId);
 
-    await RefreshTokenModel.create(
-      [
-        {
-          userId,
-          tokenId: newTokenId,
-          tokenHash: newHash,
+    const tokenHash = hashToken(refreshToken);
+
+    const session = await mongoose.startSession();
+
+    try {
+      let newAccessToken: string = "";
+      let newRefreshToken: string = "";
+
+      await session.withTransaction(async () => {
+        /**
+         * Find the exact active refresh token.
+         *
+         * Required index:
+         * { tokenHash: 1, isRevoked: 1, expiresAt: 1 }
+         */
+        const existingToken = await RefreshTokenModel.findOne({
+          tokenHash,
           isRevoked: false,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          expiresAt: {
+            $gt: new Date(),
+          },
+        })
+          .select("_id tokenId userId")
+          .session(session)
+          .lean();
+
+        /**
+         * Token does not exist, is revoked,
+         * or has expired.
+         *
+         * Revoke all active sessions for this user
+         * because this may represent token reuse.
+         */
+        if (!existingToken) {
+          await RefreshTokenModel.updateMany(
+            {
+              userId,
+              isRevoked: false,
+            },
+            {
+              $set: {
+                isRevoked: true,
+              },
+            },
+            {
+              session,
+            },
+          );
+
+          throw new UnauthorizedError(
+            "Refresh token is invalid or has already been used.",
+          );
+        }
+
+        /**
+         * Ensure the JWT tokenId matches
+         * the database token record.
+         */
+        if (existingToken.tokenId !== payload.tokenId) {
+          await RefreshTokenModel.updateMany(
+            {
+              userId,
+              isRevoked: false,
+            },
+            {
+              $set: {
+                isRevoked: true,
+              },
+            },
+            {
+              session,
+            },
+          );
+
+          throw new UnauthorizedError("Refresh token is invalid.");
+        }
+
+        /**
+         * Atomically revoke the current token.
+         *
+         * This protects against concurrent refresh requests.
+         */
+        const revokeResult = await RefreshTokenModel.updateOne(
+          {
+            _id: existingToken._id,
+            isRevoked: false,
+          },
+          {
+            $set: {
+              isRevoked: true,
+            },
+          },
+          {
+            session,
+          },
+        );
+
+        if (revokeResult.modifiedCount !== 1) {
+          throw new UnauthorizedError("Refresh token has already been used.");
+        }
+
+        /**
+         * Get the current user state inside
+         * the same transaction.
+         */
+        const user = await UserModel.findById(userId)
+          .select("_id role isActive isDeleted")
+          .session(session)
+          .lean();
+
+        if (!user || !user.isActive) {
+          throw new UnauthorizedError("User account is unavailable.");
+        }
+
+        /**
+         * Generate rotated refresh token.
+         */
+        const newTokenId = crypto.randomUUID();
+
+        newRefreshToken = signRefreshToken({
+          userId: userId.toString(),
+          tokenId: newTokenId,
+          type: "REFRESH",
+        });
+
+        const newHash = hashToken(newRefreshToken);
+
+        await RefreshTokenModel.create(
+          [
+            {
+              userId,
+              tokenId: newTokenId,
+              tokenHash: newHash,
+              isRevoked: false,
+              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+          ],
+          {
+            session,
+          },
+        );
+
+        /**
+         * Access token is generated from the
+         * current user role.
+         */
+        newAccessToken = signAccessToken({
+          userId: userId.toString(),
+          role: user.role,
+          type: "ACCESS",
+        });
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken,
         },
-      ],
-      { session },
-    );
-
-    // ✅ GET USER INSIDE TRANSACTION (CONSISTENCY)
-    const user = await UserModel.findById(userId)
-      .select("role")
-      .session(session);
-
-    if (!user) throw new Error("User not found");
-
-    await session.commitTransaction();
-
-    const newAccessToken = signAccessToken({
-      userId: userId.toString(),
-      role: user.role,
-    });
-
-    res.json({
-      success: true,
-      data: {
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
-      },
-    });
-  } catch (err) {
-    await session.abortTransaction();
-    throw err;
-  } finally {
-    session.endSession();
-  }
-});
+      });
+    } finally {
+      await session.endSession();
+    }
+  },
+);
 
 export const getCurrentUser = asyncHandler(
   async (req: Request, res: Response) => {

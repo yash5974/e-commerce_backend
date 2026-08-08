@@ -33,8 +33,6 @@ export const addToCart = async (req: Request, res: Response): Promise<void> => {
 
   const product = await ProductModel.findOne({
     _id: objectProductId,
-    isDeleted: false,
-    isActive: true,
   })
     .select("_id stock")
     .lean();
@@ -103,13 +101,9 @@ export const getCart = async (req: Request, res: Response): Promise<void> => {
   const cart = await CartModel.findOne({ userId })
     .populate({
       path: "items.productId",
-      match: {
-        isActive: true,
-        isDeleted: false,
-      },
-      select: "_id name slug images price discountPrice stock",
+      select: "_id name slug mainImage price discountPrice stock",
     })
-    .select("_id userId items createdAt updatedAt")
+    .select("_id userId items createdAt")
     .lean();
 
   if (!cart) {
@@ -129,39 +123,57 @@ export const updateCartItem = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  const userId = req.user?.userId;
   const { productId } = req.params;
   const { quantity } = req.body;
-  const userId = req.user!.userId;
 
-  const cart = await CartModel.findOne({ userId });
-
-  if (!cart) {
-    throw new NotFoundError("Cart not found");
+  if (!userId) {
+    throw new UnauthorizedError("Authentication required.");
   }
 
-  const item = cart.items.find(
-    (item) => item.productId.toString() === productId,
-  );
+  if (!productId) {
+    throw new NotFoundError("Product");
+  }
 
-  if (!item) {
+  const cart = await CartModel.findOneAndUpdate(
+    {
+      userId,
+      "items.productId": productId,
+    },
+    {
+      $set: {
+        "items.$.quantity": quantity,
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  )
+    .populate({
+      path: "items.productId",
+      select: "_id name slug mainImage price discountPrice stock",
+    })
+    .select("_id userId items createdAt updatedAt")
+    .lean();
+
+  if (!cart) {
     throw new NotFoundError("Product not found in cart");
   }
 
-  item.quantity = quantity;
-  cart.updatedAt = new Date();
+  // Remove cart items whose products no longer exist.
+  cart.items = cart.items.filter((item) => item.productId !== null);
 
-  await cart.save();
-
-  // Best-effort cache invalidation
+  // Best-effort cache invalidation.
   try {
     await CacheService.del(`cart:${userId}`);
   } catch {
-    // Ignore Redis failures
+    // Redis failure must not fail the cart update.
   }
 
   res.status(200).json({
     success: true,
-    message: "Cart updated successfully",
+    message: "Cart updated successfully.",
     data: cart,
   });
 };
@@ -189,9 +201,15 @@ export const removeCartItem = async (
       },
     },
     {
-      new: true,
+      returnDocument: "after",
     },
-  );
+  )
+    .populate({
+      path: "items.productId",
+      select: "_id name slug mainImage price discountPrice stock",
+    })
+    .select("_id userId items createdAt updatedAt")
+    .lean();
 
   if (!updatedCart) {
     const cartExists = await CartModel.exists({ userId });

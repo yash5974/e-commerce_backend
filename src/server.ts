@@ -11,14 +11,20 @@ import { redisService } from "./services/redis.service.js";
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  }),
+);
 app.use(morgan("combined"));
 app.use(express.json());
 app.use(urlencoded({ extended: true }));
 
 app.use("/", commonRouter);
 
-app.get("/", (_req: Request, res: Response) => {
+app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "Server connected.",

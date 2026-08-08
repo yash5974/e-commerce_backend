@@ -1,5 +1,12 @@
 import { Algorithm, SignOptions } from "jsonwebtoken";
-import { privateKey, publicKey } from "./env.js";
+import { environment } from "./env.js";
+
+const normalizePem = (value: string): string => {
+  return value.replace(/\\n/g, "\n").trim();
+};
+
+const privateKeyPem = normalizePem(environment.private_key);
+const publicKeyPem = normalizePem(environment.public_key);
 
 export const jwtConfig: {
   privateKey: string;
@@ -8,8 +15,8 @@ export const jwtConfig: {
   refreshTokenExpiry: SignOptions["expiresIn"];
   algorithm: Algorithm;
 } = {
-  privateKey: privateKey,
-  publicKey: publicKey,
+  privateKey: privateKeyPem,
+  publicKey: publicKeyPem,
   accessTokenExpiry: "1h",
   refreshTokenExpiry: "7d",
   algorithm: "RS256" as Algorithm,

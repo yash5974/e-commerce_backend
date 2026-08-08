@@ -7,9 +7,9 @@ import paymentRouter from "./paymentwebookRouter.js";
 import orderRouter from "./orderRouter.js";
 
 app.use("/api/v1/auth", authRouter);
-app.use("/", productRouter);
-app.use("/", cartRouter);
-app.use("/", paymentRouter);
-app.use("/", orderRouter);
+app.use("/api/v1", productRouter);
+app.use("/api/v1", cartRouter);
+app.use("/api/v1/payments", paymentRouter);
+app.use("/api/v1", orderRouter);
 
 export default app;

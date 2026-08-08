@@ -49,9 +49,7 @@ export const getProducts = async (req: Request, res: Response) => {
     sort,
   } = req.query;
 
-  const filter: any = {
-    isActive: true,
-  };
+  const filter: any = {};
 
   if (categoryId) {
     if (!mongoose.Types.ObjectId.isValid(String(categoryId))) {
@@ -272,7 +270,6 @@ export const getProductDetails = async (
 
   const product = await ProductModel.findOne({
     _id: id,
-    isActive: true,
   }).lean();
 
   if (!product) {

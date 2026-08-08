@@ -24,9 +24,8 @@ const cartSchema = new Schema<ICart>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     items: { type: [cartItemSchema], default: [] },
-    updatedAt: { type: Date, required: true },
   },
-  { timestamps: { createdAt: true, updatedAt: false } },
+  { timestamps: true },
 );
 
 // INDEX

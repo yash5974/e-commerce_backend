@@ -22,12 +22,10 @@ export const authMiddleware = (...allowedRoles: Role[]) =>
       throw new UnauthorizedError("Access token is required");
     }
 
-    let payload: AuthPayload;
+    const payload = verifyAccessToken(token) as AuthPayload;
 
-    try {
-      payload = verifyAccessToken(token) as AuthPayload;
-    } catch {
-      throw new UnauthorizedError("Invalid or expired access token");
+    if (payload.type !== "ACCESS") {
+      throw new UnauthorizedError("Invalid token type");
     }
 
     if (allowedRoles.length > 0 && !allowedRoles.includes(payload?.role)) {

@@ -3,6 +3,7 @@ import {
   addToCart,
   clearCart,
   getCart,
+  removeCartItem,
   updateCartItem,
 } from "../controller/cartController.js";
 import { authMiddleware } from "../middleware/middleware.js";
@@ -15,6 +16,11 @@ router.patch(
   "/cart/:productId",
   authMiddleware("USER"),
   asyncHandler(updateCartItem),
+);
+router.delete(
+  "/cart/:productId",
+  authMiddleware("USER"),
+  asyncHandler(removeCartItem),
 );
 router.delete("/cart", authMiddleware("USER"), asyncHandler(clearCart));
 

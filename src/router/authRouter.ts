@@ -10,8 +10,8 @@ import { authMiddleware } from "../middleware/middleware.js";
 const router = express.Router();
 
 router.post("/register", register);
-router.post("/refresh-token", authMiddleware("USER", "ADMIN"), refreshToken);
 router.post("/login", login);
+router.post("/refresh", refreshToken);
 router.post("/logout", authMiddleware("USER", "ADMIN"), logout);
 router.get("/me", authMiddleware("USER", "ADMIN"), getCurrentUser);
 

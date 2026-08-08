@@ -31,7 +31,6 @@ export const createOrder = async (
 
     const products = await ProductModel.find({
       _id: { $in: productIds },
-      isActive: true,
     })
       .select({
         name: 1,

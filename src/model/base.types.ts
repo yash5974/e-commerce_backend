@@ -5,6 +5,7 @@ export type ObjectId = Types.ObjectId;
 export interface BaseDocument {
   _id: ObjectId;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface SoftDelete {
