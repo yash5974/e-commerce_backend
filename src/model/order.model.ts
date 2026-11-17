@@ -37,7 +37,14 @@ const orderSchema = new Schema<IOrder>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, enum: Object.values(OrderStatus), required: true },
-    totalAmount: { type: Number, required: true },
+    totalAmount: {
+      type: Number,
+      required: true,
+      validate: {
+        validator: Number.isSafeInteger,
+        message: "totalAmount must be an integer in minor units",
+      },
+    },
     paymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
     items: { type: [orderItemSchema], required: true },
   },
@@ -46,6 +53,7 @@ const orderSchema = new Schema<IOrder>(
 
 // INDEXES
 orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ orderId: 1, userId: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });
 

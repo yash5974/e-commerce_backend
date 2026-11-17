@@ -47,11 +47,29 @@ export const verifyRefreshToken = (token: string): RefreshPayload => {
   }) as RefreshPayload;
 };
 
+// export const PaymentGateway = {
+//   async createIntent(amount: number) {
+//     return {
+//       providerPaymentId: crypto.randomUUID(),
+//       clientSecret: crypto.randomUUID(),
+//     };
+//   },
+// };
+
 export const PaymentGateway = {
-  async createIntent(amount: number) {
+  async createIntent(
+    amount: number,
+    options: {
+      idempotencyKey: string;
+    },
+  ) {
+    const paymentIntentId = `pi_${crypto.randomBytes(16).toString("hex")}`;
+    const secret = crypto.randomBytes(24).toString("hex");
     return {
-      providerPaymentId: crypto.randomUUID(),
-      clientSecret: crypto.randomUUID(),
+      providerPaymentId: paymentIntentId,
+      clientSecret: `${paymentIntentId}_secret_${secret}`,
+      amount,
+      idempotencyKey: options.idempotencyKey,
     };
   },
 };

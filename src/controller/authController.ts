@@ -7,9 +7,10 @@ import {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
+  ValidationError,
 } from "../errors/domain.errors.js";
 import { RefreshTokenModel } from "../model/refreshToken.model.js";
-import { UserModel } from "../model/user.model.js";
+import { UserModel, UserRole } from "../model/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { CacheService } from "../utils/cache.js";
 import {
@@ -18,6 +19,33 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "../utils/jwt.js";
+
+export const adminRegister = asyncHandler(
+  async (req: Request, res: Response) => {
+    // 🔥 Index-covered query
+    const existingUser = await UserModel.findOne({
+      email: "admin@gmail.com",
+    }).select("_id");
+
+    if (existingUser) throw new Error("Admin already exists");
+
+    // 🔒 Hash password
+    const passwordHash = await bcrypt.hash("Admin@123", 12);
+
+    const user = await UserModel.create({
+      name: "Admin",
+      email: "admin@gmail.com",
+      role: UserRole.ADMIN,
+      passwordHash,
+    });
+    if (!user) throw new Error("User not registered");
+
+    res.status(201).json({
+      success: true,
+      data: user,
+    });
+  },
+);
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { name, email, password } = req.body;
@@ -311,6 +339,148 @@ export const refreshToken = asyncHandler(
   },
 );
 
+export const forgotPassword = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email } = req.body;
+    if (!email) {
+      throw new ValidationError("Email is required.");
+    }
+
+    const user = await UserModel.findOne({ email }).select("_id").lean().exec();
+    if (!user) {
+      throw new NotFoundError("User");
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000);
+    const otpExpiresAt = new Date(Date.now() + 2 * 60 * 1000);
+
+    const setOtp = await UserModel.findOneAndUpdate(
+      { email, _id: user._id },
+      { $set: { otp, otpExpiresAt } },
+      { returnDocument: "after" },
+    )
+      .select("_id email otp otpExpiresAt")
+      .lean()
+      .exec();
+    if (!setOtp) {
+      throw new Error("Error while generating OTP");
+    }
+
+    return res.json({
+      status: 200,
+      message: "OTP generated successfully",
+      result: {
+        email: setOtp.email,
+      },
+    });
+  },
+);
+
+export const resetPassword = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { email, otp } = req.body;
+
+    if (typeof email !== "string" || !email.trim()) {
+      throw new ValidationError("Email is required.");
+    }
+
+    if (!Number.isInteger(otp) || otp < 100000 || otp > 999999) {
+      throw new ValidationError("OTP must be a valid 6-digit integer.");
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await UserModel.findOne({
+      email: normalizedEmail,
+      isActive: true,
+    })
+      .select("_id email otp otpExpiresAt")
+      .lean()
+      .exec();
+
+    if (!user) {
+      throw new NotFoundError("User");
+    }
+
+    if (!user.otp) {
+      throw new ValidationError(
+        "No OTP is available. Please request a new OTP.",
+      );
+    }
+
+    if (!user.otpExpiresAt || new Date() >= user.otpExpiresAt) {
+      throw new ValidationError("OTP is expired.");
+    }
+
+    if (otp !== user.otp) {
+      throw new ValidationError("OTP does not match");
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully.",
+      result: { userId: user._id },
+    });
+  },
+);
+
+export const newPassword = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { userId, newPassword, confirmPassword } = req.body;
+    if (!userId) {
+      throw new ValidationError("User Id is required");
+    }
+
+    if (typeof newPassword !== "string" || !newPassword) {
+      throw new ValidationError("New password is required.");
+    }
+
+    if (typeof confirmPassword !== "string" || !confirmPassword) {
+      throw new ValidationError("Confirm password is required.");
+    }
+
+    if (newPassword !== confirmPassword) {
+      throw new ValidationError("Passwords do not match.");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    /*
+     * Atomic password update.
+     */
+    const user = await UserModel.findOneAndUpdate(
+      {
+        _id: userId,
+        isActive: true,
+      },
+      {
+        $set: {
+          passwordHash,
+          otp: null,
+          expiresAt: null,
+        },
+      },
+      {
+        returnDocument: "after",
+        projection: {
+          _id: 1,
+        },
+      },
+    )
+      .lean()
+      .exec();
+
+    if (!user) {
+      throw new UnauthorizedError("User not found.");
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Password has been reset successfully.",
+    });
+  },
+);
+
 export const getCurrentUser = asyncHandler(
   async (req: Request, res: Response) => {
     if (!req.user) {
@@ -336,8 +506,9 @@ export const getCurrentUser = asyncHandler(
     }
 
     const user = await UserModel.findById(userId)
-      .select("_id fullName email role isActive createdAt updatedAt")
+      .select("email role isActive name")
       .lean();
+    console.log("user: ", user);
 
     if (!user) {
       throw new NotFoundError("User not found");
@@ -357,20 +528,117 @@ export const getCurrentUser = asyncHandler(
   },
 );
 
+export const updateProfile = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required.");
+    }
+
+    const { userId } = req.user;
+
+    if (!mongoose.isValidObjectId(userId)) {
+      throw new UnauthorizedError("Invalid authentication payload.");
+    }
+
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+      throw new ValidationError("A valid JSON request body is required.");
+    }
+
+    const allowedFields = new Set(["name", "email"]);
+    const keys = Object.keys(req.body);
+
+    if (keys.length === 0 || keys.some((key) => !allowedFields.has(key))) {
+      throw new ValidationError(
+        "Provide name or email. Unsupported fields are not allowed.",
+      );
+    }
+
+    const updates: { name?: string; email?: string } = {};
+
+    if (req.body.name !== undefined) {
+      if (
+        typeof req.body.name !== "string" ||
+        req.body.name.trim().length < 2 ||
+        req.body.name.trim().length > 80
+      ) {
+        throw new ValidationError(
+          "Name must contain between 2 and 80 characters.",
+        );
+      }
+
+      updates.name = req.body.name.trim();
+    }
+
+    if (req.body.email !== undefined) {
+      if (
+        typeof req.body.email !== "string" ||
+        req.body.email.trim().length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.email.trim())
+      ) {
+        throw new ValidationError("A valid email address is required.");
+      }
+
+      updates.email = req.body.email.trim().toLowerCase();
+    }
+
+    const cacheKey = `user:profile:${userId}`;
+
+    const user = await UserModel.findOneAndUpdate(
+      {
+        _id: userId,
+        isActive: true,
+      },
+      {
+        $set: updates,
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .select("_id name email role isActive")
+      .lean()
+      .exec();
+
+    if (!user) {
+      throw new NotFoundError("Active user not found.");
+    }
+
+    try {
+      await CacheService.set(
+        cacheKey,
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isActive: user.isActive,
+        },
+        300,
+      );
+    } catch (error: unknown) {
+      console.error("Failed to refresh profile cache.", error);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: user,
+    });
+  },
+);
+
 export const logout = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) throw new Error("Refresh token required");
 
-  const tokenHash = hashToken(refreshToken);
+  const result = await RefreshTokenModel.deleteMany({
+    userId: req.user.userId,
+  });
 
-  const result = await RefreshTokenModel.updateOne(
-    { tokenHash, isRevoked: false, expiresAt: { $gt: new Date() } },
-    { $set: { isRevoked: true } },
-  );
-
-  if (result.modifiedCount === 0) {
+  if (!result) {
     throw new Error("Invalid or already logged out");
   }
 
-  res.json({ success: true });
+  res.json({ success: true, message: "User logged out successfully" });
 });

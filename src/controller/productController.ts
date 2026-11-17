@@ -2,12 +2,14 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import mongoose, { Types } from "mongoose";
 import slugify from "slugify";
+import { dropboxConfig } from "../config/dropbox.config.js";
 import { redisClient } from "../config/redis.js";
 import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
 } from "../errors/domain.errors.js";
+import { dropboxStorage } from "../infrastructure/storage/dropbox/dropbox.storage.js";
 import { CategoryModel } from "../model/category.model.js";
 import {
   InventoryLogModel,
@@ -27,6 +29,32 @@ export interface UpdateInventoryParams {
 }
 
 type ProductCache = SuccessResponse<IProduct[]>;
+
+export const getCategories = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  const categories = await CategoryModel.find(
+    {},
+    {
+      _id: 1,
+      name: 1,
+      slug: 1,
+    },
+  )
+    .sort({
+      name: 1,
+      _id: 1,
+    })
+    .lean()
+    .exec();
+
+  res.status(200).json({
+    success: true,
+    message: "Categories fetched successfully",
+    data: categories,
+  });
+};
 
 export const getProducts = async (req: Request, res: Response) => {
   const page = Math.max(Number(req.query.page) || 1, 1);
@@ -203,12 +231,12 @@ export const getProducts = async (req: Request, res: Response) => {
 
   const [products, totalProducts] = await Promise.all([
     ProductModel.find(filter)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(limit)
       .select(
         "_id name slug brand price discountPrice stock mainImage rating reviewCount",
       )
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
       .lean(),
 
     ProductModel.countDocuments(filter),
@@ -217,28 +245,22 @@ export const getProducts = async (req: Request, res: Response) => {
   const totalPages = Math.ceil(totalProducts / limit);
 
   const response = {
+    success: true,
+    message: "Products fetched successfully",
     data: products,
-
     meta: {
       page,
       limit,
       totalProducts,
       totalPages,
-
       hasNextPage: page < totalPages,
-
       hasPreviousPage: page > 1,
     },
   };
 
   await CacheService.set(cacheKey, response, 120);
 
-  return res.status(200).json({
-    success: true,
-    message: "Products fetched successfully",
-    data: products,
-    meta: response.meta,
-  });
+  return res.status(200).json(response);
 };
 
 export const getProductDetails = async (
@@ -285,6 +307,29 @@ export const getProductDetails = async (
   });
 };
 
+interface ProductUploadFiles {
+  mainImage?: Express.Multer.File[];
+  galleryImages?: Express.Multer.File[];
+}
+
+const normalizeTags = (tags: unknown): string[] => {
+  if (Array.isArray(tags)) {
+    return tags
+      .filter((tag): tag is string => typeof tag === "string")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof tags === "string") {
+    return tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 export const createProduct = async (req: Request, res: Response) => {
   const {
     name,
@@ -292,15 +337,56 @@ export const createProduct = async (req: Request, res: Response) => {
     categoryId,
     brand,
     price,
-    discountPrice = 0,
+    discountPrice = "0",
     stock,
-    mainImage,
-    galleryImages = [],
     tags = [],
   } = req.body;
 
-  if (discountPrice > price) {
-    throw new ValidationError("Discount price cannot be greater than price");
+  const files = req.files as ProductUploadFiles | undefined;
+
+  const mainImage = files?.mainImage?.[0];
+  const galleryImages = files?.galleryImages ?? [];
+
+  if (!mainImage) {
+    throw new ValidationError("Main image is required.");
+  }
+
+  if (!name?.trim()) {
+    throw new ValidationError("Product name is required.");
+  }
+
+  if (!description?.trim()) {
+    throw new ValidationError("Description is required.");
+  }
+
+  if (!categoryId) {
+    throw new ValidationError("Category is required.");
+  }
+
+  if (!brand?.trim()) {
+    throw new ValidationError("Brand is required.");
+  }
+
+  const numericPrice = Number(price);
+  const numericDiscountPrice = Number(discountPrice);
+  const numericStock = Number(stock);
+
+  if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+    throw new ValidationError("Price must be a valid non-negative number.");
+  }
+
+  if (!Number.isFinite(numericDiscountPrice) || numericDiscountPrice < 0) {
+    throw new ValidationError(
+      "Discount price must be a valid non-negative number.",
+    );
+  }
+
+  if (!Number.isInteger(numericStock) || numericStock < 0) {
+    throw new ValidationError("Stock must be a valid non-negative integer.");
+  }
+
+  if (numericDiscountPrice > numericPrice) {
+    throw new ValidationError("Discount price cannot be greater than price.");
   }
 
   const categoryExists = await CategoryModel.exists({
@@ -311,44 +397,93 @@ export const createProduct = async (req: Request, res: Response) => {
     throw new NotFoundError("Category");
   }
 
-  const product = await ProductModel.create({
-    name: name.trim(),
-    slug: slugify(name, {
-      lower: true,
-      strict: true,
-      trim: true,
-    }),
-    description: description.trim(),
-    categoryId,
-    brand: brand.trim(),
-    price,
-    discountPrice,
-    stock,
-    mainImage,
-    galleryImages,
-    tags,
-    rating: 0,
-    reviewCount: 0,
-    isActive: true,
-  });
+  const normalizedTags = normalizeTags(tags);
+  const productId = new mongoose.Types.ObjectId();
 
-  if (redisClient.isOpen) {
-    try {
-      const keys = await redisClient.keys("products:*");
+  const uploadedDropboxPaths: string[] = [];
 
-      if (keys.length) {
-        await redisClient.del(keys);
-      }
-    } catch {
-      // Cache invalidation failure should not fail the request.
+  try {
+    const productFolder = `${dropboxConfig.rootFolder}/${productId.toString()}`;
+    const mainImageFolder = `${productFolder}/main`;
+    const galleryImageFolder = `${productFolder}/gallery`;
+
+    const mainImageResult = await dropboxStorage.uploadImage({
+      buffer: mainImage.buffer,
+      filename: mainImage.originalname,
+      mimeType: mainImage.mimetype,
+      folder: mainImageFolder,
+    });
+
+    uploadedDropboxPaths.push(mainImageResult.path);
+
+    const uploadedGalleryImages: Array<{
+      path: string;
+      url: string;
+    }> = [];
+
+    for (const image of galleryImages) {
+      const result = await dropboxStorage.uploadImage({
+        buffer: image.buffer,
+        filename: image.originalname,
+        mimeType: image.mimetype,
+        folder: galleryImageFolder,
+      });
+
+      uploadedDropboxPaths.push(result.path);
+
+      uploadedGalleryImages.push({
+        path: result.path,
+        url: result.url,
+      });
     }
-  }
 
-  return res.status(201).json({
-    success: true,
-    message: "Product created successfully.",
-    data: product,
-  });
+    const product = await ProductModel.create({
+      _id: productId,
+      name: name.trim(),
+      slug: slugify(name, {
+        lower: true,
+        strict: true,
+        trim: true,
+      }),
+      description: description.trim(),
+      categoryId,
+      brand: brand.trim(),
+      price: numericPrice,
+      discountPrice: numericDiscountPrice,
+      stock: numericStock,
+      mainImage: mainImageResult.url,
+      galleryImages: uploadedGalleryImages.map((image) => image.url),
+      tags: normalizedTags,
+      rating: 0,
+      reviewCount: 0,
+      isActive: true,
+    });
+
+    if (redisClient.isOpen) {
+      try {
+        const keys = await redisClient.keys("products:*");
+        if (keys.length) {
+          await redisClient.del(keys);
+        }
+      } catch {}
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Product created successfully.",
+      data: product,
+    });
+  } catch (error) {
+    await Promise.allSettled(
+      uploadedDropboxPaths.map((path) =>
+        dropboxStorage.deleteFile({
+          path,
+        }),
+      ),
+    );
+
+    throw error;
+  }
 };
 
 export const updateProduct = async (req: Request, res: Response) => {
@@ -445,8 +580,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       $set: updateData,
     },
     {
-      new: true,
-      runValidators: true,
+      returnDocument: "after",
     },
   );
 
@@ -475,7 +609,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
       },
     },
     {
-      new: true,
+      returnDocument: "after",
     },
   );
 
@@ -504,7 +638,6 @@ export const updateInventory = async (req: Request, res: Response) => {
     const product = await ProductModel.findOneAndUpdate(
       {
         _id: productId,
-        isActive: true,
         ...(type === InventoryLogType.ORDER && {
           stock: { $gte: quantity },
         }),

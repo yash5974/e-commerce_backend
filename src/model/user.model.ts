@@ -1,4 +1,4 @@
-import { Schema, model, Document } from "mongoose";
+import { Document, Schema, model } from "mongoose";
 import { BaseDocument, SoftDelete } from "./base.types.js";
 
 export enum UserRole {
@@ -11,6 +11,8 @@ export interface IUser extends BaseDocument, SoftDelete, Document {
   email: string;
   passwordHash: string;
   role: UserRole;
+  otp: Number | null;
+  otpExpiresAt: Date | null;
 }
 
 const userSchema = new Schema<IUser>(
@@ -24,6 +26,11 @@ const userSchema = new Schema<IUser>(
       default: UserRole.USER,
     },
     isActive: { type: Boolean, default: true },
+    otp: { type: Number, default: null },
+    otpExpiresAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

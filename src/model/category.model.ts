@@ -16,5 +16,6 @@ const categorySchema = new Schema<ICategory>(
 
 // INDEX
 categorySchema.index({ slug: 1 });
+categorySchema.index({ name: 1, _id: 1 });
 
 export const CategoryModel = model<ICategory>("Category", categorySchema);

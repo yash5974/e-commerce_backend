@@ -1,5 +1,3 @@
-// utils/paymentWebhookSignature.ts
-
 import crypto from "crypto";
 import { PaymentProvider } from "../model/payment.model.js";
 

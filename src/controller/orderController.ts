@@ -114,6 +114,7 @@ export const getMyOrders = async (
     .sort({
       createdAt: -1,
     })
+    .populate("paymentId", "status provider")
     .lean();
 
   res.status(200).json({
@@ -127,10 +128,17 @@ export const getOrderDetails = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
-  const order = await OrderModel.findOne({
-    _id: req.params.id,
-    userId: req.user!.userId,
-  }).lean();
+  const query =
+    req.user!.role === "admin"
+      ? { _id: req.params.id }
+      : {
+          _id: req.params.id,
+          userId: req.user!.userId,
+        };
+
+  const order = await OrderModel.findOne(query)
+    .populate("paymentId", "status provider")
+    .lean();
 
   if (!order) {
     throw new NotFoundError("Order");
