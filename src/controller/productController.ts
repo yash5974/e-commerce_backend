@@ -1,15 +1,11 @@
 import crypto from "crypto";
 import { Request, Response } from "express";
 import mongoose, { Types } from "mongoose";
-import slugify from "slugify";
-import { dropboxConfig } from "../config/dropbox.config.js";
-import { redisClient } from "../config/redis.js";
 import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
 } from "../errors/domain.errors.js";
-import { dropboxStorage } from "../infrastructure/storage/dropbox/dropbox.storage.js";
 import { CategoryModel } from "../model/category.model.js";
 import {
   InventoryLogModel,
@@ -330,270 +326,270 @@ const normalizeTags = (tags: unknown): string[] => {
   return [];
 };
 
-export const createProduct = async (req: Request, res: Response) => {
-  const {
-    name,
-    description,
-    categoryId,
-    brand,
-    price,
-    discountPrice = "0",
-    stock,
-    tags = [],
-  } = req.body;
+// export const createProduct = async (req: Request, res: Response) => {
+//   const {
+//     name,
+//     description,
+//     categoryId,
+//     brand,
+//     price,
+//     discountPrice = "0",
+//     stock,
+//     tags = [],
+//   } = req.body;
 
-  const files = req.files as ProductUploadFiles | undefined;
+//   const files = req.files as ProductUploadFiles | undefined;
 
-  const mainImage = files?.mainImage?.[0];
-  const galleryImages = files?.galleryImages ?? [];
+//   const mainImage = files?.mainImage?.[0];
+//   const galleryImages = files?.galleryImages ?? [];
 
-  if (!mainImage) {
-    throw new ValidationError("Main image is required.");
-  }
+//   if (!mainImage) {
+//     throw new ValidationError("Main image is required.");
+//   }
 
-  if (!name?.trim()) {
-    throw new ValidationError("Product name is required.");
-  }
+//   if (!name?.trim()) {
+//     throw new ValidationError("Product name is required.");
+//   }
 
-  if (!description?.trim()) {
-    throw new ValidationError("Description is required.");
-  }
+//   if (!description?.trim()) {
+//     throw new ValidationError("Description is required.");
+//   }
 
-  if (!categoryId) {
-    throw new ValidationError("Category is required.");
-  }
+//   if (!categoryId) {
+//     throw new ValidationError("Category is required.");
+//   }
 
-  if (!brand?.trim()) {
-    throw new ValidationError("Brand is required.");
-  }
+//   if (!brand?.trim()) {
+//     throw new ValidationError("Brand is required.");
+//   }
 
-  const numericPrice = Number(price);
-  const numericDiscountPrice = Number(discountPrice);
-  const numericStock = Number(stock);
+//   const numericPrice = Number(price);
+//   const numericDiscountPrice = Number(discountPrice);
+//   const numericStock = Number(stock);
 
-  if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-    throw new ValidationError("Price must be a valid non-negative number.");
-  }
+//   if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+//     throw new ValidationError("Price must be a valid non-negative number.");
+//   }
 
-  if (!Number.isFinite(numericDiscountPrice) || numericDiscountPrice < 0) {
-    throw new ValidationError(
-      "Discount price must be a valid non-negative number.",
-    );
-  }
+//   if (!Number.isFinite(numericDiscountPrice) || numericDiscountPrice < 0) {
+//     throw new ValidationError(
+//       "Discount price must be a valid non-negative number.",
+//     );
+//   }
 
-  if (!Number.isInteger(numericStock) || numericStock < 0) {
-    throw new ValidationError("Stock must be a valid non-negative integer.");
-  }
+//   if (!Number.isInteger(numericStock) || numericStock < 0) {
+//     throw new ValidationError("Stock must be a valid non-negative integer.");
+//   }
 
-  if (numericDiscountPrice > numericPrice) {
-    throw new ValidationError("Discount price cannot be greater than price.");
-  }
+//   if (numericDiscountPrice > numericPrice) {
+//     throw new ValidationError("Discount price cannot be greater than price.");
+//   }
 
-  const categoryExists = await CategoryModel.exists({
-    _id: categoryId,
-  });
+//   const categoryExists = await CategoryModel.exists({
+//     _id: categoryId,
+//   });
 
-  if (!categoryExists) {
-    throw new NotFoundError("Category");
-  }
+//   if (!categoryExists) {
+//     throw new NotFoundError("Category");
+//   }
 
-  const normalizedTags = normalizeTags(tags);
-  const productId = new mongoose.Types.ObjectId();
+//   const normalizedTags = normalizeTags(tags);
+//   const productId = new mongoose.Types.ObjectId();
 
-  const uploadedDropboxPaths: string[] = [];
+//   const uploadedDropboxPaths: string[] = [];
 
-  try {
-    const productFolder = `${dropboxConfig.rootFolder}/${productId.toString()}`;
-    const mainImageFolder = `${productFolder}/main`;
-    const galleryImageFolder = `${productFolder}/gallery`;
+//   try {
+//     const productFolder = `${dropboxConfig.rootFolder}/${productId.toString()}`;
+//     const mainImageFolder = `${productFolder}/main`;
+//     const galleryImageFolder = `${productFolder}/gallery`;
 
-    const mainImageResult = await dropboxStorage.uploadImage({
-      buffer: mainImage.buffer,
-      filename: mainImage.originalname,
-      mimeType: mainImage.mimetype,
-      folder: mainImageFolder,
-    });
+//     const mainImageResult = await dropboxStorage.uploadImage({
+//       buffer: mainImage.buffer,
+//       filename: mainImage.originalname,
+//       mimeType: mainImage.mimetype,
+//       folder: mainImageFolder,
+//     });
 
-    uploadedDropboxPaths.push(mainImageResult.path);
+//     uploadedDropboxPaths.push(mainImageResult.path);
 
-    const uploadedGalleryImages: Array<{
-      path: string;
-      url: string;
-    }> = [];
+//     const uploadedGalleryImages: Array<{
+//       path: string;
+//       url: string;
+//     }> = [];
 
-    for (const image of galleryImages) {
-      const result = await dropboxStorage.uploadImage({
-        buffer: image.buffer,
-        filename: image.originalname,
-        mimeType: image.mimetype,
-        folder: galleryImageFolder,
-      });
+//     for (const image of galleryImages) {
+//       const result = await dropboxStorage.uploadImage({
+//         buffer: image.buffer,
+//         filename: image.originalname,
+//         mimeType: image.mimetype,
+//         folder: galleryImageFolder,
+//       });
 
-      uploadedDropboxPaths.push(result.path);
+//       uploadedDropboxPaths.push(result.path);
 
-      uploadedGalleryImages.push({
-        path: result.path,
-        url: result.url,
-      });
-    }
+//       uploadedGalleryImages.push({
+//         path: result.path,
+//         url: result.url,
+//       });
+//     }
 
-    const product = await ProductModel.create({
-      _id: productId,
-      name: name.trim(),
-      slug: slugify(name, {
-        lower: true,
-        strict: true,
-        trim: true,
-      }),
-      description: description.trim(),
-      categoryId,
-      brand: brand.trim(),
-      price: numericPrice,
-      discountPrice: numericDiscountPrice,
-      stock: numericStock,
-      mainImage: mainImageResult.url,
-      galleryImages: uploadedGalleryImages.map((image) => image.url),
-      tags: normalizedTags,
-      rating: 0,
-      reviewCount: 0,
-      isActive: true,
-    });
+//     const product = await ProductModel.create({
+//       _id: productId,
+//       name: name.trim(),
+//       slug: slugify(name, {
+//         lower: true,
+//         strict: true,
+//         trim: true,
+//       }),
+//       description: description.trim(),
+//       categoryId,
+//       brand: brand.trim(),
+//       price: numericPrice,
+//       discountPrice: numericDiscountPrice,
+//       stock: numericStock,
+//       mainImage: mainImageResult.url,
+//       galleryImages: uploadedGalleryImages.map((image) => image.url),
+//       tags: normalizedTags,
+//       rating: 0,
+//       reviewCount: 0,
+//       isActive: true,
+//     });
 
-    if (redisClient.isOpen) {
-      try {
-        const keys = await redisClient.keys("products:*");
-        if (keys.length) {
-          await redisClient.del(keys);
-        }
-      } catch {}
-    }
+//     if (redisClient.isOpen) {
+//       try {
+//         const keys = await redisClient.keys("products:*");
+//         if (keys.length) {
+//           await redisClient.del(keys);
+//         }
+//       } catch {}
+//     }
 
-    return res.status(201).json({
-      success: true,
-      message: "Product created successfully.",
-      data: product,
-    });
-  } catch (error) {
-    await Promise.allSettled(
-      uploadedDropboxPaths.map((path) =>
-        dropboxStorage.deleteFile({
-          path,
-        }),
-      ),
-    );
+//     return res.status(201).json({
+//       success: true,
+//       message: "Product created successfully.",
+//       data: product,
+//     });
+//   } catch (error) {
+//     await Promise.allSettled(
+//       uploadedDropboxPaths.map((path) =>
+//         dropboxStorage.deleteFile({
+//           path,
+//         }),
+//       ),
+//     );
 
-    throw error;
-  }
-};
+//     throw error;
+//   }
+// };
 
-export const updateProduct = async (req: Request, res: Response) => {
-  const { id } = req.params;
+// export const updateProduct = async (req: Request, res: Response) => {
+//   const { id } = req.params;
 
-  const {
-    name,
-    description,
-    categoryId,
-    brand,
-    price,
-    discountPrice,
-    stock,
-    mainImage,
-    galleryImages,
-    tags,
-    isActive,
-  } = req.body;
+//   const {
+//     name,
+//     description,
+//     categoryId,
+//     brand,
+//     price,
+//     discountPrice,
+//     stock,
+//     mainImage,
+//     galleryImages,
+//     tags,
+//     isActive,
+//   } = req.body;
 
-  if (
-    price !== undefined &&
-    discountPrice !== undefined &&
-    discountPrice > price
-  ) {
-    throw new ValidationError("Discount price cannot be greater than price");
-  }
+//   if (
+//     price !== undefined &&
+//     discountPrice !== undefined &&
+//     discountPrice > price
+//   ) {
+//     throw new ValidationError("Discount price cannot be greater than price");
+//   }
 
-  if (categoryId) {
-    const categoryExists = await CategoryModel.exists({
-      _id: categoryId,
-    });
+//   if (categoryId) {
+//     const categoryExists = await CategoryModel.exists({
+//       _id: categoryId,
+//     });
 
-    if (!categoryExists) {
-      throw new NotFoundError("Category");
-    }
-  }
+//     if (!categoryExists) {
+//       throw new NotFoundError("Category");
+//     }
+//   }
 
-  const updateData: Record<string, unknown> = {};
+//   const updateData: Record<string, unknown> = {};
 
-  if (name !== undefined) {
-    updateData.name = name.trim();
-    updateData.slug = slugify(name, {
-      lower: true,
-      strict: true,
-      trim: true,
-    });
-  }
+//   if (name !== undefined) {
+//     updateData.name = name.trim();
+//     updateData.slug = slugify(name, {
+//       lower: true,
+//       strict: true,
+//       trim: true,
+//     });
+//   }
 
-  if (description !== undefined) {
-    updateData.description = description.trim();
-  }
+//   if (description !== undefined) {
+//     updateData.description = description.trim();
+//   }
 
-  if (categoryId !== undefined) {
-    updateData.categoryId = categoryId;
-  }
+//   if (categoryId !== undefined) {
+//     updateData.categoryId = categoryId;
+//   }
 
-  if (brand !== undefined) {
-    updateData.brand = brand.trim();
-  }
+//   if (brand !== undefined) {
+//     updateData.brand = brand.trim();
+//   }
 
-  if (price !== undefined) {
-    updateData.price = price;
-  }
+//   if (price !== undefined) {
+//     updateData.price = price;
+//   }
 
-  if (discountPrice !== undefined) {
-    updateData.discountPrice = discountPrice;
-  }
+//   if (discountPrice !== undefined) {
+//     updateData.discountPrice = discountPrice;
+//   }
 
-  if (stock !== undefined) {
-    updateData.stock = stock;
-  }
+//   if (stock !== undefined) {
+//     updateData.stock = stock;
+//   }
 
-  if (mainImage !== undefined) {
-    updateData.mainImage = mainImage;
-  }
+//   if (mainImage !== undefined) {
+//     updateData.mainImage = mainImage;
+//   }
 
-  if (galleryImages !== undefined) {
-    updateData.galleryImages = galleryImages;
-  }
+//   if (galleryImages !== undefined) {
+//     updateData.galleryImages = galleryImages;
+//   }
 
-  if (tags !== undefined) {
-    updateData.tags = tags;
-  }
+//   if (tags !== undefined) {
+//     updateData.tags = tags;
+//   }
 
-  if (isActive !== undefined) {
-    updateData.isActive = isActive;
-  }
+//   if (isActive !== undefined) {
+//     updateData.isActive = isActive;
+//   }
 
-  const product = await ProductModel.findOneAndUpdate(
-    {
-      _id: id,
-    },
-    {
-      $set: updateData,
-    },
-    {
-      returnDocument: "after",
-    },
-  );
+//   const product = await ProductModel.findOneAndUpdate(
+//     {
+//       _id: id,
+//     },
+//     {
+//       $set: updateData,
+//     },
+//     {
+//       returnDocument: "after",
+//     },
+//   );
 
-  if (!product) {
-    throw new NotFoundError("Product");
-  }
+//   if (!product) {
+//     throw new NotFoundError("Product");
+//   }
 
-  return res.status(200).json({
-    success: true,
-    message: "Product updated successfully.",
-    data: product,
-  });
-};
+//   return res.status(200).json({
+//     success: true,
+//     message: "Product updated successfully.",
+//     data: product,
+//   });
+// };
 
 export const deleteProduct = async (req: Request, res: Response) => {
   const { id } = req.params;

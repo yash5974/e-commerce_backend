@@ -1,6 +1,5 @@
 import express from "express";
 import {
-  createProduct,
   deleteProduct,
   getCategories,
   getProductDetails,
@@ -8,7 +7,6 @@ import {
   getRevenueAnalytics,
   getTopProductsAnalytics,
   updateInventory,
-  updateProduct,
 } from "../controller/productController.js";
 import { authMiddleware } from "../middleware/middleware.js";
 import { asyncHandler } from "./../utils/asyncHandler.js";
@@ -21,16 +19,6 @@ router.get(
   asyncHandler(getCategories),
 );
 router.get("/products/:id", asyncHandler(getProductDetails));
-router.post(
-  "/admin/products",
-  authMiddleware("ADMIN"),
-  asyncHandler(createProduct),
-);
-router.put(
-  "/admin/products/:id",
-  authMiddleware("ADMIN"),
-  asyncHandler(updateProduct),
-);
 router.delete(
   "/admin/products/:id",
   authMiddleware("ADMIN"),

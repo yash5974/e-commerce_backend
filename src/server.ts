@@ -3,9 +3,7 @@ import express, { Request, Response, urlencoded } from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import { connectDB } from "./config/db.js";
-import { dropboxConfig } from "./config/dropbox.config.js";
 import { environment } from "./config/env.js";
-import { dropboxStorage } from "./infrastructure/storage/dropbox/dropbox.storage.js";
 import { globalErrorHandler } from "./middleware/globalError.middleware.js";
 import commonRouter from "./router/common.router.js";
 import webhookRouter from "./router/webhook.routes.js";
@@ -52,8 +50,6 @@ const startServer = async (): Promise<void> => {
     await connectDB();
 
     await redisService.connect();
-
-    await dropboxStorage.ensureFolder(dropboxConfig.rootFolder);
 
     app.listen(port, () => {
       console.log(`🚀 Server running on port ${port}`);
