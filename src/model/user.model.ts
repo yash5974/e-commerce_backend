@@ -11,7 +11,7 @@ export interface IUser extends BaseDocument, SoftDelete, Document {
   email: string;
   passwordHash: string;
   role: UserRole;
-  otp: Number | null;
+  otp: String | null;
   otpExpiresAt: Date | null;
 }
 
@@ -26,10 +26,11 @@ const userSchema = new Schema<IUser>(
       default: UserRole.USER,
     },
     isActive: { type: Boolean, default: true },
-    otp: { type: Number, default: null },
+    otp: { type: String, default: null, select: false },
     otpExpiresAt: {
       type: Date,
       default: null,
+      select: false,
     },
   },
   { timestamps: { createdAt: true, updatedAt: false } },

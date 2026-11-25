@@ -19,6 +19,8 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "../utils/jwt.js";
+import { generateOtp, hashOtp } from "../utils/otp.utils.js";
+import { EmailService } from "../services/email.service.js";
 
 export const adminRegister = asyncHandler(
   async (req: Request, res: Response) => {
@@ -341,85 +343,200 @@ export const refreshToken = asyncHandler(
 
 export const forgotPassword = asyncHandler(
   async (req: Request, res: Response) => {
-    const { email } = req.body;
+    const email =
+      typeof req.body.email === "string"
+        ? req.body.email.trim().toLowerCase()
+        : "";
+
     if (!email) {
       throw new ValidationError("Email is required.");
     }
 
-    const user = await UserModel.findOne({ email }).select("_id").lean().exec();
-    if (!user) {
-      throw new NotFoundError("User");
-    }
+    const genericResponse = {
+      status: 200,
+      message:
+        "If an account exists with this email, a password reset OTP will be sent.",
+    };
 
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    const otpExpiresAt = new Date(Date.now() + 2 * 60 * 1000);
-
-    const setOtp = await UserModel.findOneAndUpdate(
-      { email, _id: user._id },
-      { $set: { otp, otpExpiresAt } },
-      { returnDocument: "after" },
-    )
-      .select("_id email otp otpExpiresAt")
+    // Find the registered user.
+    const user = await UserModel.findOne({ email })
+      .select("_id name email")
       .lean()
       .exec();
-    if (!setOtp) {
-      throw new Error("Error while generating OTP");
+
+    // Do not reveal whether an account exists.
+    if (!user) {
+      return res.status(200).json(genericResponse);
     }
 
-    return res.json({
-      status: 200,
-      message: "OTP generated successfully",
-      result: {
-        email: setOtp.email,
+    // Generate a cryptographically secure OTP.
+    const otp = generateOtp();
+    const hashedOtp = hashOtp(otp);
+
+    const otpExpiresAt = new Date(Date.now() + 2 * 60 * 1000);
+
+    // Store only the hashed OTP.
+    const updatedUser = await UserModel.findOneAndUpdate(
+      {
+        _id: user._id,
+        email: user.email,
       },
-    });
+      {
+        $set: {
+          otp: hashedOtp,
+          otpExpiresAt,
+        },
+      },
+      {
+        returnDocument: "after",
+        runValidators: true,
+      },
+    )
+      .select("_id email")
+      .lean()
+      .exec();
+
+    if (!updatedUser) {
+      throw new Error("Unable to generate password reset OTP.");
+    }
+
+    // Send OTP to the registered email address.
+    try {
+      await EmailService.sendPasswordResetOtpEmail({
+        email: updatedUser.email,
+        customerName: user.name || "Customer",
+        otp,
+        expiresInMinutes: 2,
+      });
+    } catch (error: unknown) {
+      // Invalidate the OTP if email delivery fails.
+      await UserModel.findOneAndUpdate(
+        {
+          _id: user._id,
+          otp: hashedOtp,
+        },
+        {
+          $unset: {
+            otp: 1,
+            otpExpiresAt: 1,
+          },
+        },
+        { returnDocument: "after" },
+      );
+
+      console.error("Password reset OTP email failed:", error);
+
+      throw new Error("Unable to send password reset email.");
+    }
+
+    return res.status(200).json(genericResponse);
   },
 );
+
+// export const resetPassword = asyncHandler(
+//   async (req: Request, res: Response): Promise<void> => {
+//     const { email, otp } = req.body;
+
+//     if (typeof email !== "string" || !email.trim()) {
+//       throw new ValidationError("Email is required.");
+//     }
+
+//     if (!Number.isInteger(otp) || otp < 100000 || otp > 999999) {
+//       throw new ValidationError("OTP must be a valid 6-digit integer.");
+//     }
+
+//     const normalizedEmail = email.trim().toLowerCase();
+
+//     const user = await UserModel.findOne({
+//       email: normalizedEmail,
+//       isActive: true,
+//     })
+//       .select("_id email otp otpExpiresAt")
+//       .lean()
+//       .exec();
+
+//     if (!user) {
+//       throw new NotFoundError("User");
+//     }
+
+//     if (!user.otp) {
+//       throw new ValidationError(
+//         "No OTP is available. Please request a new OTP.",
+//       );
+//     }
+
+//     if (!user.otpExpiresAt || new Date() >= user.otpExpiresAt) {
+//       throw new ValidationError("OTP is expired.");
+//     }
+
+//     if (otp !== user.otp) {
+//       throw new ValidationError("OTP does not match");
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: "OTP verified successfully.",
+//       result: { userId: user._id },
+//     });
+//   },
+// );
 
 export const resetPassword = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const { email, otp } = req.body;
 
+    // Validate email
     if (typeof email !== "string" || !email.trim()) {
       throw new ValidationError("Email is required.");
     }
 
-    if (!Number.isInteger(otp) || otp < 100000 || otp > 999999) {
-      throw new ValidationError("OTP must be a valid 6-digit integer.");
+    // Validate OTP
+    const normalizedOtp =
+      typeof otp === "string" ? otp.trim() : String(otp ?? "");
+
+    if (!/^\d{6}$/.test(normalizedOtp)) {
+      throw new ValidationError("OTP must be a valid 6-digit code.");
     }
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await UserModel.findOne({
-      email: normalizedEmail,
-      isActive: true,
-    })
-      .select("_id email otp otpExpiresAt")
+    // Hash submitted OTP
+    const hashedOtp = hashOtp(normalizedOtp);
+
+    // Atomically verify and consume OTP
+    const user = await UserModel.findOneAndUpdate(
+      {
+        email: normalizedEmail,
+        isActive: true,
+        otp: hashedOtp,
+        otpExpiresAt: { $gt: new Date() },
+      },
+      {
+        $unset: {
+          otp: 1,
+          otpExpiresAt: 1,
+        },
+      },
+      {
+        new: true,
+      },
+    )
+      .select("_id email")
       .lean()
       .exec();
 
     if (!user) {
-      throw new NotFoundError("User");
-    }
-
-    if (!user.otp) {
       throw new ValidationError(
-        "No OTP is available. Please request a new OTP.",
+        "Invalid or expired OTP. Please request a new OTP.",
       );
-    }
-
-    if (!user.otpExpiresAt || new Date() >= user.otpExpiresAt) {
-      throw new ValidationError("OTP is expired.");
-    }
-
-    if (otp !== user.otp) {
-      throw new ValidationError("OTP does not match");
     }
 
     res.status(200).json({
       success: true,
       message: "OTP verified successfully.",
-      result: { userId: user._id },
+      result: {
+        userId: user._id,
+      },
     });
   },
 );

@@ -8,6 +8,7 @@ import { globalErrorHandler } from "./middleware/globalError.middleware.js";
 import commonRouter from "./router/common.router.js";
 import webhookRouter from "./router/webhook.routes.js";
 import { redisService } from "./services/redis.service.js";
+import { emailConfig, verifyEmailConnection } from "./config/email.config.js";
 
 const app = express();
 
@@ -51,6 +52,8 @@ const startServer = async (): Promise<void> => {
 
     await redisService.connect();
 
+    await verifyEmailConnection();
+
     app.listen(port, () => {
       console.log(`🚀 Server running on port ${port}`);
     });
@@ -66,6 +69,7 @@ const shutdown = async (): Promise<void> => {
   console.log("Gracefully shutting down...");
 
   await redisService.disconnect();
+  emailConfig.transporter.close();
 
   process.exit(0);
 };
