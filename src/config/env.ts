@@ -24,6 +24,7 @@ const getBooleanEnv = (key: string, defaultValue = false): boolean => {
 export const environment = {
   // Server
   PORT: getEnv("PORT", false, "3000"),
+  ALLOWED_NETWORK: getEnv("ALLOWED_NETWORK", true),
 
   // Database
   DB_CONNECTION: getEnv("DB_CONNECTION", true),
