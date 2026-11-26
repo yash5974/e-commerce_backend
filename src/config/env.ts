@@ -1,24 +1,38 @@
 import dotenv from "dotenv";
+
 dotenv.config({ quiet: true });
 
-const getEnv = (key: string, required = true): string => {
-  const value = process.env[key];
+const getEnv = (key: string, required = false, defaultValue = ""): string => {
+  const value = process.env[key]?.trim();
 
-  if (required && (!value || !value.trim())) {
-    throw new Error(`Missing environment variable: ${key}`);
+  if (required && !value) {
+    throw new Error(`Missing required environment variable: ${key}`);
   }
 
-  return value?.trim() ?? "";
+  return value || defaultValue;
+};
+
+const getBooleanEnv = (key: string, defaultValue = false): boolean => {
+  const value = process.env[key]?.trim().toLowerCase();
+
+  if (!value) return defaultValue;
+
+  return value === "true";
 };
 
 export const environment = {
-  PORT: getEnv("PORT"),
-  DB_CONNECTION: getEnv("DB_CONNECTION"),
+  // Server
+  PORT: getEnv("PORT", false, "3000"),
+
+  // Database
+  DB_CONNECTION: getEnv("DB_CONNECTION", true),
+
+  // Redis
   redisUrl: getEnv("REDIS_URL"),
 
   // JWT
-  private_key: getEnv("JWT_PRIVATE_KEY"),
-  public_key: getEnv("JWT_PUBLIC_KEY"),
+  private_key: getEnv("JWT_PRIVATE_KEY", true),
+  public_key: getEnv("JWT_PUBLIC_KEY", true),
 
   // Stripe
   stripe_webhook_secret: getEnv("STRIPE_WEBHOOK_SECRET"),
@@ -31,13 +45,15 @@ export const environment = {
 
   // SMTP
   SMTP_HOST: getEnv("SMTP_HOST"),
-  SMTP_PORT: getEnv("SMTP_PORT"),
-  SMTP_SECURE: getEnv("SMTP_SECURE", false).toLowerCase() === "true",
+  SMTP_PORT: getEnv("SMTP_PORT", false, "587"),
+  SMTP_SECURE: getBooleanEnv("SMTP_SECURE"),
   EMAIL_FROM_ADDRESS: getEnv("EMAIL_FROM_ADDRESS"),
   SMTP_USER: getEnv("SMTP_USER"),
   SMTP_PASSWORD: getEnv("SMTP_PASSWORD"),
-  EMAIL_ENABLED: getEnv("EMAIL_ENABLED", false),
+
+  // Email
+  EMAIL_ENABLED: getBooleanEnv("EMAIL_ENABLED"),
 
   // OTP
-  OTP_SECRET: getEnv("OTP_SECRET"),
+  OTP_SECRET: getEnv("OTP_SECRET", true),
 };
