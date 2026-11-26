@@ -2,6 +2,9 @@ import { Algorithm, SignOptions } from "jsonwebtoken";
 import { environment } from "./env.js";
 
 const normalizePem = (value: string): string => {
+  if (!value) {
+    throw new Error("Missing required environment variable");
+  }
   return value.replace(/\\n/g, "\n").trim();
 };
 
