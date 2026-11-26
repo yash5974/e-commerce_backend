@@ -2,7 +2,7 @@ import { Algorithm, SignOptions } from "jsonwebtoken";
 import { environment } from "./env.js";
 
 const normalizePem = (value: string): string => {
-  return value.replace(/\\n/g, "\n").trim();
+  return value.replace(/\\n/g, "\n").replace(/\r\n/g, "\n").trim();
 };
 
 const privateKeyPem = normalizePem(environment.private_key);
